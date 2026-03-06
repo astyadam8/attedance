@@ -1,9 +1,12 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
+import { fileURLToPath } from "url";
 import Database from "better-sqlite3";
-import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 dotenv.config();
 
@@ -108,12 +111,12 @@ async function startServer() {
   });
 
   app.post("/api/attendance/verify", async (req, res) => {
-    const { studentId, image, verified } = req.body;
+    const { studentId, image, verified, manual } = req.body;
     const student = db.prepare("SELECT * FROM students WHERE id = ?").get(studentId) as any;
 
     if (!student) return res.status(404).json({ success: false, message: "Student not found" });
 
-    if (!verified) {
+    if (!verified && !manual) {
       return res.status(400).json({ success: false, message: "Verifikasi AI gagal" });
     }
 
@@ -128,9 +131,9 @@ async function startServer() {
       }
 
       db.prepare("INSERT INTO attendance (student_id, date, time, status, method, photo_proof) VALUES (?, ?, ?, ?, ?, ?)")
-        .run(studentId, date, time, "present", "selfie", image);
+        .run(studentId, date, time, "present", manual ? "manual" : "selfie", image || null);
       
-      res.json({ success: true, message: "Absensi Selfie Berhasil!" });
+      res.json({ success: true, message: manual ? "Absensi Manual Berhasil!" : "Absensi Selfie Berhasil!" });
     } catch (error: any) {
       console.error(error);
       res.status(500).json({ success: false, message: "Gagal menyimpan absensi" });

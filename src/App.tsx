@@ -567,6 +567,8 @@ const TeacherDashboard = ({ user }: { user: UserType }) => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [newStudent, setNewStudent] = useState({ name: '', nis: '', class: '', photo_url: 'https://picsum.photos/seed/student/400/400' });
 
+  const [searchTerm, setSearchTerm] = useState('');
+
   const fetchData = async () => {
     const [sRes, aRes] = await Promise.all([
       fetch('/api/students'),
@@ -576,9 +578,25 @@ const TeacherDashboard = ({ user }: { user: UserType }) => {
     setAttendance(await aRes.json());
   };
 
+  const filteredAttendance = attendance.filter(a => 
+    a.student_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    a.student_class?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   useEffect(() => {
     fetchData();
   }, []);
+
+  const handleManualAttendance = async (studentId: number) => {
+    const res = await fetch('/api/attendance/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ studentId, image: null, verified: true, manual: true })
+    });
+    if (res.ok) {
+      fetchData();
+    }
+  };
 
   const handleAddStudent = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -644,7 +662,9 @@ const TeacherDashboard = ({ user }: { user: UserType }) => {
               </Card>
               <Card className="bg-amber-500 text-white border-none">
                 <p className="text-amber-50 text-sm font-medium">Tingkat Kehadiran</p>
-                <p className="text-4xl font-bold mt-1">92%</p>
+                <p className="text-4xl font-bold mt-1">
+                  {students.length > 0 ? Math.round((attendance.filter(a => a.date === new Date().toISOString().split('T')[0]).length / students.length) * 100) : 0}%
+                </p>
                 <BarChart3 className="absolute top-6 right-6 opacity-20" size={48} />
               </Card>
             </div>
@@ -652,13 +672,18 @@ const TeacherDashboard = ({ user }: { user: UserType }) => {
             <Card>
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-xl font-bold">Log Absensi Terbaru</h3>
-                <div className="relative">
-                  <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input 
-                    type="text" 
-                    placeholder="Cari siswa..." 
-                    className="pl-10 pr-4 py-2 rounded-xl border border-slate-200 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
+                <div className="flex gap-3">
+                  <Button variant="secondary" onClick={fetchData} className="text-xs">Refresh</Button>
+                  <div className="relative">
+                    <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input 
+                      type="text" 
+                      placeholder="Cari siswa..." 
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-10 pr-4 py-2 rounded-xl border border-slate-200 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
                 </div>
               </div>
               <div className="overflow-x-auto">
@@ -673,7 +698,7 @@ const TeacherDashboard = ({ user }: { user: UserType }) => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
-                    {attendance.map((a) => (
+                    {filteredAttendance.map((a) => (
                       <tr key={a.id} className="hover:bg-slate-50 transition-all">
                         <td className="py-4">
                           <div className="flex items-center gap-3">
@@ -739,6 +764,13 @@ const TeacherDashboard = ({ user }: { user: UserType }) => {
                     </div>
                   </div>
                   <div className="mt-4 pt-4 border-t border-slate-50 flex justify-end gap-2">
+                    <Button 
+                      onClick={() => handleManualAttendance(s.id)}
+                      variant="ghost" 
+                      className="text-xs py-1 px-3 text-emerald-600 hover:bg-emerald-50"
+                    >
+                      Hadirkan
+                    </Button>
                     <Button variant="ghost" className="text-xs py-1 px-3">Edit</Button>
                     <Button variant="ghost" className="text-xs py-1 px-3 text-red-500">Hapus</Button>
                   </div>
@@ -851,6 +883,10 @@ const ParentDashboard = ({ user }: { user: UserType }) => {
     fetchAttendance();
   }, []);
 
+  const totalDays = 20; // Target hari sekolah per bulan
+  const presentCount = attendance.filter(a => a.status === 'present').length;
+  const attendancePercentage = Math.round((presentCount / totalDays) * 100);
+
   return (
     <div className="max-w-4xl mx-auto">
       <header className="mb-8">
@@ -878,16 +914,16 @@ const ParentDashboard = ({ user }: { user: UserType }) => {
               </div>
               <div>
                 <p className="font-bold text-amber-900">Belum Ada Catatan Hadir</p>
-                <p className="text-sm text-amber-700">Anak Anda belum melakukan scan wajah hari ini.</p>
+                <p className="text-sm text-amber-700">Anak Anda belum melakukan selfie absensi hari ini.</p>
               </div>
             </div>
           )}
         </Card>
         <Card className="flex flex-col items-center justify-center text-center">
           <p className="text-sm text-slate-500 mb-1">Persentase Kehadiran</p>
-          <p className="text-5xl font-bold text-indigo-600">95%</p>
+          <p className="text-5xl font-bold text-indigo-600">{attendancePercentage}%</p>
           <div className="w-full h-2 bg-slate-100 rounded-full mt-4 overflow-hidden">
-            <div className="h-full bg-indigo-600 w-[95%]" />
+            <div className="h-full bg-indigo-600 transition-all duration-500" style={{ width: `${attendancePercentage}%` }} />
           </div>
         </Card>
       </div>
