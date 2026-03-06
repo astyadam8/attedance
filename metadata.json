@@ -1,0 +1,5 @@
+{
+  "name": "Absensi Pintar (Smart Attendance)",
+  "description": "Aplikasi absensi sekolah modern dengan fitur scan wajah AI, statistik kehadiran, dan dashboard khusus untuk Siswa, Guru, dan Orang Tua.",
+  "requestFramePermissions": ["camera"]
+}
