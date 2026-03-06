@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { GoogleGenAI } from "@google/genai";
+import { supabase } from './lib/supabase';
 import { 
   User, 
   LayoutDashboard, 
@@ -68,19 +69,20 @@ const LoginPage = ({ onLogin }: { onLogin: (user: UserType) => void }) => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch('/api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
-      });
-      const data = await res.json();
-      if (data.success) {
-        onLogin(data.user);
+      const { data: user, error: supabaseError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('username', username)
+        .eq('password', password)
+        .single();
+
+      if (user && !supabaseError) {
+        onLogin(user);
       } else {
-        setError(data.message);
+        setError('Username atau password salah');
       }
     } catch (err) {
-      setError('Gagal terhubung ke server');
+      setError('Gagal terhubung ke database cloud');
     }
   };
 
@@ -221,22 +223,32 @@ const SelfieCapture = ({ studentId, onComplete }: { studentId: number, onComplet
         return;
       }
 
-      const res = await fetch('/api/attendance/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ studentId, image: imageData, verified: true })
-      });
-      const data = await res.json();
+      const now = new Date();
+      const date = now.toISOString().split('T')[0];
+      const time = now.toTimeString().split(' ')[0];
+
+      const { data, error } = await supabase
+        .from('attendance')
+        .insert([
+          { 
+            student_id: studentId, 
+            date: date, 
+            time: time, 
+            status: "present", 
+            method: "selfie", 
+            photo_proof: imageData 
+          }
+        ]);
       
-      if (data.success) {
+      if (!error) {
         setStatus('success');
-        setMessage(data.message);
+        setMessage("Absensi Selfie Berhasil!");
         setTimeout(() => {
           onComplete();
         }, 2000);
       } else {
         setStatus('error');
-        setMessage(data.message);
+        setMessage(error.message);
         setIsScanning(false);
       }
     } catch (err) {
@@ -443,9 +455,15 @@ const StudentDashboard = ({ user }: { user: UserType }) => {
   const [attendance, setAttendance] = useState<Attendance[]>([]);
 
   const fetchAttendance = async () => {
-    const res = await fetch(`/api/attendance/${user.student_id}`);
-    const data = await res.json();
-    setAttendance(data);
+    const { data, error } = await supabase
+      .from('attendance')
+      .select('*')
+      .eq('student_id', user.student_id)
+      .order('date', { ascending: false });
+    
+    if (data && !error) {
+      setAttendance(data);
+    }
   };
 
   useEffect(() => {
@@ -570,12 +588,22 @@ const TeacherDashboard = ({ user }: { user: UserType }) => {
   const [searchTerm, setSearchTerm] = useState('');
 
   const fetchData = async () => {
-    const [sRes, aRes] = await Promise.all([
-      fetch('/api/students'),
-      fetch('/api/attendance-all')
-    ]);
-    setStudents(await sRes.json());
-    setAttendance(await aRes.json());
+    const { data: studentsData } = await supabase.from('students').select('*');
+    const { data: attendanceData } = await supabase
+      .from('attendance')
+      .select('*, students(name, class)')
+      .order('date', { ascending: false })
+      .order('time', { ascending: false });
+
+    // Flatten the joined data to match previous structure
+    const formattedAttendance = (attendanceData || []).map((a: any) => ({
+      ...a,
+      student_name: a.students?.name,
+      student_class: a.students?.class
+    }));
+
+    setStudents(studentsData || []);
+    setAttendance(formattedAttendance);
   };
 
   const filteredAttendance = attendance.filter(a => 
@@ -588,24 +616,51 @@ const TeacherDashboard = ({ user }: { user: UserType }) => {
   }, []);
 
   const handleManualAttendance = async (studentId: number) => {
-    const res = await fetch('/api/attendance/verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ studentId, image: null, verified: true, manual: true })
-    });
-    if (res.ok) {
+    const now = new Date();
+    const date = now.toISOString().split('T')[0];
+    const time = now.toTimeString().split(' ')[0];
+
+    const { error } = await supabase
+      .from('attendance')
+      .insert([
+        { 
+          student_id: studentId, 
+          date, 
+          time, 
+          status: "present", 
+          method: "manual", 
+          photo_proof: null 
+        }
+      ]);
+
+    if (!error) {
       fetchData();
     }
   };
 
   const handleAddStudent = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await fetch('/api/students', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newStudent)
-    });
-    if (res.ok) {
+    
+    const { data: student, error: studentError } = await supabase
+      .from('students')
+      .insert([newStudent])
+      .select()
+      .single();
+
+    if (student && !studentError) {
+      // Create user for student
+      await supabase
+        .from('users')
+        .insert([
+          { 
+            username: newStudent.nis, 
+            password: "password123", 
+            role: "student", 
+            name: newStudent.name, 
+            student_id: student.id 
+          }
+        ]);
+
       setShowAddModal(false);
       setNewStudent({ name: '', nis: '', class: '', photo_url: 'https://picsum.photos/seed/student/400/400' });
       fetchData();
@@ -876,9 +931,15 @@ const ParentDashboard = ({ user }: { user: UserType }) => {
 
   useEffect(() => {
     const fetchAttendance = async () => {
-      const res = await fetch(`/api/attendance/${user.student_id}`);
-      const data = await res.json();
-      setAttendance(data);
+      const { data, error } = await supabase
+        .from('attendance')
+        .select('*')
+        .eq('student_id', user.student_id)
+        .order('date', { ascending: false });
+      
+      if (data && !error) {
+        setAttendance(data);
+      }
     };
     fetchAttendance();
   }, []);
